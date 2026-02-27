@@ -168,20 +168,35 @@ const PREVIEW_CACHE_DIR = path.join(__dirname, 'cache', 'previews');
 const PREVIEW_CACHE_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours
 const PREVIEW_CACHE_MAX_SIZE_MB = 100;
 
-// Delete and recreate cache directory on startup to ensure fresh previews after code updates
-try {
-  if (fs.existsSync(PREVIEW_CACHE_DIR)) {
-    // Remove the entire directory recursively
-    fs.rmSync(PREVIEW_CACHE_DIR, { recursive: true, force: true });
-    console.log('[Cache] Deleted preview cache directory on startup');
-  }
-  // Recreate the directory fresh
+// Ensure cache directory exists
+if (!fs.existsSync(PREVIEW_CACHE_DIR)) {
   fs.mkdirSync(PREVIEW_CACHE_DIR, { recursive: true });
-  console.log('[Cache] Preview cache directory recreated fresh:', PREVIEW_CACHE_DIR);
-} catch (err) {
-  console.error('[Cache] CRITICAL - Failed to setup cache directory on startup:', err.message);
-  process.exit(1); // Fail hard if we can't setup cache - better than silently proceeding
+  log('[Cache] Created preview cache directory');
 }
+
+// Clean up old cache files on startup (files older than 24 hours)
+async function cleanOldCacheFiles() {
+  try {
+    const files = await fs.promises.readdir(PREVIEW_CACHE_DIR);
+    let cleaned = 0;
+    for (const file of files) {
+      const filePath = path.join(PREVIEW_CACHE_DIR, file);
+      const stat = await fs.promises.stat(filePath);
+      if (Date.now() - stat.mtimeMs > PREVIEW_CACHE_MAX_AGE) {
+        await fs.promises.unlink(filePath);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      log(`[Cache] Cleaned ${cleaned} expired cache files`);
+    }
+  } catch (err) {
+    log('[Cache] Error cleaning old cache files:', err.message);
+  }
+}
+
+// Run cleanup on startup
+cleanOldCacheFiles();
 
 /**
  * Atomic write to cache to prevent race conditions (write-then-rename pattern)
