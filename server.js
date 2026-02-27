@@ -199,6 +199,42 @@ async function cleanOldCacheFiles() {
 cleanOldCacheFiles();
 
 /**
+ * Enforce cache size limit by removing oldest files when exceeding limit
+ * Runs periodically to prevent unbounded cache growth
+ */
+async function enforceCacheSizeLimit() {
+  try {
+    const files = await fs.promises.readdir(PREVIEW_CACHE_DIR);
+    let totalSize = 0;
+    const fileStats = [];
+
+    for (const file of files) {
+      const filePath = path.join(PREVIEW_CACHE_DIR, file);
+      const stat = await fs.promises.stat(filePath);
+      totalSize += stat.size;
+      fileStats.push({ file, filePath, mtime: stat.mtimeMs, size: stat.size });
+    }
+
+    const maxSizeBytes = PREVIEW_CACHE_MAX_SIZE_MB * 1024 * 1024;
+
+    if (totalSize > maxSizeBytes) {
+      fileStats.sort((a, b) => a.mtime - b.mtime);
+      for (const f of fileStats) {
+        await fs.promises.unlink(f.filePath);
+        totalSize -= f.size;
+        if (totalSize <= maxSizeBytes * 0.9) break; // Stop at 90% of limit
+      }
+      log(`[Cache] Enforced size limit, removed files. Current size: ${(totalSize / (1024 * 1024)).toFixed(2)} MB`);
+    }
+  } catch (err) {
+    log('[Cache] Error enforcing size limit:', err.message);
+  }
+}
+
+// Run size enforcement every hour
+setInterval(enforceCacheSizeLimit, 60 * 60 * 1000);
+
+/**
  * Atomic write to cache to prevent race conditions (write-then-rename pattern)
  */
 async function writeToCacheAtomic(filename, buffer) {
