@@ -1268,19 +1268,26 @@ app.get('/api/auth/me', requireAuth, apiLimiter, (req, res, next) => {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   
-  db.get("SELECT id, email, organisation_id, role, email_verified FROM users WHERE id = ?", [req.user.id], (err, user) => {
-    if (err) return next(err);
-    if (!user) {
-      return res.status(404).json({ error: 'User not found' });
+  db.get(
+    `SELECT u.id, u.email, u.organisation_id, u.role, u.email_verified, o.slug as org_slug
+     FROM users u LEFT JOIN organisations o ON u.organisation_id = o.id
+     WHERE u.id = ?`,
+    [req.user.id],
+    (err, user) => {
+      if (err) return next(err);
+      if (!user) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      res.json({
+        id: user.id,
+        email: user.email,
+        organisationId: user.organisation_id,
+        role: user.role,
+        emailVerified: user.email_verified === 1,
+        orgSlug: user.org_slug || null
+      });
     }
-    res.json({
-      id: user.id,
-      email: user.email,
-      organisationId: user.organisation_id,
-      role: user.role,
-      emailVerified: user.email_verified === 1
-    });
-  });
+  );
 });
 
 // Validation schemas
@@ -1917,6 +1924,41 @@ app.get('/api/cards/:slug', cardReadLimiter, [
   });
 });
 
+// GET Admin Card by Owner (Admin endpoint - fetch a specific user's card by userId and slug)
+app.get('/api/admin/cards/:userId/:slug', requireAuth, requireRole('owner'), apiLimiter, [
+  param('userId').isInt({ min: 1 }).withMessage('Invalid userId'),
+  slugValidation
+], handleValidationErrors, (req, res, next) => {
+  const targetUserId = parseInt(req.params.userId, 10);
+  const slug = req.params.slug.toLowerCase();
+
+  // Verify the target user belongs to the same organisation as the admin
+  db.get(
+    "SELECT id FROM users WHERE id = ? AND organisation_id = ?",
+    [targetUserId, req.user.organisationId],
+    (err, user) => {
+      if (err) return next(err);
+      if (!user) return res.status(404).json({ error: 'User not found in your organisation' });
+
+      db.get(
+        "SELECT data, short_code FROM cards WHERE slug = ? AND user_id = ?",
+        [slug, targetUserId],
+        (err, row) => {
+          if (err) return next(err);
+          if (!row) return res.status(404).json({ error: 'Card not found' });
+          try {
+            const cardData = JSON.parse(row.data);
+            cardData._shortCode = row.short_code;
+            res.json(cardData);
+          } catch (e) {
+            next(e);
+          }
+        }
+      );
+    }
+  );
+});
+
 // SAVE/UPDATE Card
 app.post('/api/cards/:slug', requireAuth, apiLimiter, csrfProtection, [
   slugValidation,
@@ -2182,33 +2224,55 @@ app.delete('/api/cards/:slug', requireAuth, apiLimiter, csrfProtection, [
   slugValidation
 ], handleValidationErrors, async (req, res, next) => {
   const slug = req.params.slug.toLowerCase();
-  // Ensure user is authenticated and can only delete their own cards
+  // Ensure user is authenticated
   if (!req.user.id) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
 
-  // First, fetch the card to get short_code for cache invalidation
-  db.get("SELECT short_code FROM cards WHERE slug = ? AND user_id = ?", [slug, req.user.id], (err, card) => {
-    if (err) return next(err);
-    if (!card) {
-      return res.status(404).json({ error: 'Card not found' });
-    }
+  // Owners may pass ?userId= to delete another user's card within their organisation
+  const requestedUserId = req.query.userId ? parseInt(req.query.userId, 10) : null;
+  const isOwnerDeletingForUser =
+    req.user.role === 'owner' && requestedUserId && requestedUserId !== req.user.id;
 
-    const shortCode = card.short_code;
-
-    // Now delete the card
-    db.run("DELETE FROM cards WHERE slug = ? AND user_id = ?", [slug, req.user.id], async function(err) {
+  const performDelete = (targetUserId) => {
+    // First, fetch the card to get short_code for cache invalidation
+    db.get("SELECT short_code FROM cards WHERE slug = ? AND user_id = ?", [slug, targetUserId], (err, card) => {
       if (err) return next(err);
-      if (this.changes === 0) {
+      if (!card) {
         return res.status(404).json({ error: 'Card not found' });
       }
 
-      // Invalidate cache for both slug and short_code
-      await invalidatePreviewCache(slug, shortCode);
+      const shortCode = card.short_code;
 
-      res.json({ success: true });
+      // Now delete the card
+      db.run("DELETE FROM cards WHERE slug = ? AND user_id = ?", [slug, targetUserId], async function(err) {
+        if (err) return next(err);
+        if (this.changes === 0) {
+          return res.status(404).json({ error: 'Card not found' });
+        }
+
+        // Invalidate cache for both slug and short_code
+        await invalidatePreviewCache(slug, shortCode);
+
+        res.json({ success: true });
+      });
     });
-  });
+  };
+
+  if (isOwnerDeletingForUser) {
+    // Verify the target user belongs to the same organisation
+    db.get(
+      "SELECT id FROM users WHERE id = ? AND organisation_id = ?",
+      [requestedUserId, req.user.organisationId],
+      (err, user) => {
+        if (err) return next(err);
+        if (!user) return res.status(404).json({ error: 'User not found in your organisation' });
+        performDelete(requestedUserId);
+      }
+    );
+  } else {
+    performDelete(req.user.id);
+  }
 });
 
 // Helper function to get organization settings
@@ -2246,18 +2310,18 @@ const getOrganizationSettings = (organisationId, callback) => {
   });
 };
 
-// GET Public Settings (theme_colors and theme_variant, no auth required)
-// Returns theme_colors and theme_variant from specified organization or default organization
+// GET Public Settings (theme_colors, theme_variant, and default_organisation, no auth required)
+// Returns settings from specified organization or default organization
 // Accepts optional ?orgSlug= parameter to get settings for a specific organization
 app.get('/api/settings', apiLimiter, (req, res, next) => {
   const orgSlug = req.query.orgSlug || 'default';
   
-  // Get theme_colors and theme_variant from specified organization
+  // Get theme_colors, theme_variant, and default_organisation from specified organization
   db.all(`
     SELECT os.key, os.value 
     FROM organisation_settings os
     JOIN organisations o ON os.organisation_id = o.id
-    WHERE o.slug = ? AND os.key IN ('theme_colors', 'theme_variant')
+    WHERE o.slug = ? AND os.key IN ('theme_colors', 'theme_variant', 'default_organisation')
   `, [orgSlug], (err, rows) => {
     if (err) {
       return next(err);
@@ -2272,6 +2336,8 @@ app.get('/api/settings', apiLimiter, (req, res, next) => {
           settings.theme_colors = JSON.parse(row.value);
         } else if (row.key === 'theme_variant') {
           settings.theme_variant = row.value;
+        } else if (row.key === 'default_organisation') {
+          settings.default_organisation = row.value;
         }
       } catch (e) {
         console.error(`Error parsing setting ${row.key}:`, e);
@@ -2284,6 +2350,9 @@ app.get('/api/settings', apiLimiter, (req, res, next) => {
     }
     if (!settings.theme_variant) {
       settings.theme_variant = 'swiish';
+    }
+    if (!settings.default_organisation) {
+      settings.default_organisation = 'My Organisation';
     }
     
     res.json(settings);

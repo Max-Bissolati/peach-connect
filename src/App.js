@@ -865,7 +865,7 @@ const [settings, setSettings] = useState({
       checkSetupStatus().then((status) => {
         if (status && status.setupComplete && status.userCount > 0) {
           // Setup already complete, redirect to login
-          navigate('/login');
+          navigate('/login', { replace: true });
         } else {
           // Setup not complete, show wizard
           setView('setup-wizard');
@@ -884,7 +884,7 @@ const [settings, setSettings] = useState({
       checkAuth().then((authResult) => {
         if (authResult.isAuthenticated) {
           // If authenticated, redirect to dashboard (explicit redirect)
-          navigate('/people');
+          navigate('/people', { replace: true });
         } else {
           // Not authenticated, show login page
           setView('admin-login');
@@ -957,7 +957,7 @@ const [settings, setSettings] = useState({
           // Setup complete, check authentication
           if (path === '/' || path === '/admin') {
             // Redirect root/admin to /people (explicit redirect)
-            navigate('/people');
+            navigate('/people', { replace: true });
             return; // Let next effect run handle /people
           }
           // Set view to loading while checking auth
@@ -971,7 +971,7 @@ const [settings, setSettings] = useState({
                 } else {
                   // Navigate to first card editor (explicit navigation)
                   const firstCard = authResult.cardList[0];
-                  navigate(`/people/edit/${firstCard.slug}`);
+                  navigate(`/people/edit/${firstCard.slug}`, { replace: true });
                 }
               } else {
                 // Owner - show dashboard
@@ -980,11 +980,11 @@ const [settings, setSettings] = useState({
           document.title = "Admin Dashboard";
             } else {
               // Not authenticated, redirect to login (explicit redirect)
-              navigate('/login');
+              navigate('/login', { replace: true });
             }
           }).catch((e) => {
             console.error('Auth check failed:', e);
-            navigate('/login');
+            navigate('/login', { replace: true });
           });
         }
       }).catch((e) => {
@@ -1019,7 +1019,11 @@ const [settings, setSettings] = useState({
           const list = await res.json();
           setCardList(list);
           setIsAuthenticated(true);
-          fetchSettings();
+          if (userData.role === 'member') {
+            fetchPublicSettings(userData.orgSlug || 'default');
+          } else {
+            fetchSettings();
+          }
           
           return { isAuthenticated: true, userData, cardList: list };
         } else {
@@ -1585,8 +1589,13 @@ const [settings, setSettings] = useState({
     }
   };
 
-  const handleEdit = async (slug) => {
-    const res = await fetch(`${API_ENDPOINT}/cards/${slug}`, {
+  const handleEdit = async (slug, userId) => {
+    // If editing another user's card, use the admin endpoint to fetch the correct card
+    const isOtherUser = userId && userId !== currentUserId;
+    const fetchUrl = isOtherUser
+      ? `${API_ENDPOINT}/admin/cards/${userId}/${slug}`
+      : `${API_ENDPOINT}/cards/${slug}`;
+    const res = await fetch(fetchUrl, {
       credentials: 'include'
     });
     if (res.ok) {
@@ -1604,6 +1613,12 @@ const [settings, setSettings] = useState({
         links: json.links || [],
         privacy: json.privacy || defaultTemplate.privacy
       });
+      // Track the owner so handleSave sends it to the correct user's card
+      if (isOtherUser) {
+        setTargetUserIdForNewCard(userId);
+      } else {
+        setTargetUserIdForNewCard(null);
+      }
       setCurrentSlug(slug);
       setView('admin-editor');
       // Navigate to editor route only if not already there
@@ -1613,11 +1628,15 @@ const [settings, setSettings] = useState({
     }
   };
 
-  const handleDelete = async (slug) => {
+  const handleDelete = async (slug, userId) => {
     showConfirm(
       `Are you sure you want to delete ${slug}?`,
       async () => {
-        const res = await apiCall(`${API_ENDPOINT}/cards/${slug}`, {
+        const isOtherUser = userId && userId !== currentUserId;
+        const deleteUrl = isOtherUser
+          ? `${API_ENDPOINT}/cards/${slug}?userId=${encodeURIComponent(userId)}`
+          : `${API_ENDPOINT}/cards/${slug}`;
+        const res = await apiCall(deleteUrl, {
           method: 'DELETE'
         });
         if (res.ok) {
@@ -1929,7 +1948,7 @@ const [settings, setSettings] = useState({
                                   <div className="w-20 h-20 rounded-full bg-surface dark:bg-surface-dark overflow-hidden border-thick border-border-subtle dark:border-border-dark flex-shrink-0">
                                     {card.avatar ? <img src={card.avatar} className="w-full h-full object-cover" alt="avatar" /> : <User className="w-full h-full p-5 text-text-muted-subtle dark:text-text-muted-dark" />}
                                   </div>
-                                  <button onClick={(e) => { e.stopPropagation(); handleDelete(card.slug); }} className="absolute top-0 right-0 p-2 text-text-muted-subtle dark:text-text-muted-dark hover:text-error-text dark:hover:text-error-text-dark hover:bg-error-bg dark:hover:bg-error-bg-dark rounded-full transition-colors">
+                                   <button onClick={(e) => { e.stopPropagation(); handleDelete(card.slug, card.userId); }} className="absolute top-0 right-0 p-2 text-text-muted-subtle dark:text-text-muted-dark hover:text-error-text dark:hover:text-error-text-dark hover:bg-error-bg dark:hover:bg-error-bg-dark rounded-full transition-colors">
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                   <div className="flex-1 flex flex-col text-left min-w-0">
@@ -1962,7 +1981,7 @@ const [settings, setSettings] = useState({
                                   >
                                     <ExternalLink className="w-3 h-3"/> View
                                   </a>
-                                  <button onClick={() => handleEdit(card.slug)} className="flex-1 py-2 text-xs font-medium text-confirm-text dark:text-confirm-text-dark bg-confirm dark:bg-confirm-dark rounded-button hover:bg-confirm-hover dark:hover:bg-confirm-hover-dark flex items-center justify-center gap-1"><Edit3 className="w-3 h-3"/> Edit</button>
+                                   <button onClick={() => handleEdit(card.slug, card.userId)} className="flex-1 py-2 text-xs font-medium text-confirm-text dark:text-confirm-text-dark bg-confirm dark:bg-confirm-dark rounded-button hover:bg-confirm-hover dark:hover:bg-confirm-hover-dark flex items-center justify-center gap-1"><Edit3 className="w-3 h-3"/> Edit</button>
                                 </div>
                               </div>
                             </div>
@@ -2214,6 +2233,7 @@ const [settings, setSettings] = useState({
             toggleDarkMode={toggleDarkMode}
             isSaving={isSaving}
             isSuccess={isSuccess}
+            onLogout={userRole === 'member' ? handleLogout : undefined}
           />
           <VersionBadge />
           <Modal isOpen={modal.isOpen} onClose={closeModal} type={modal.type} title={modal.title} message={modal.message} onConfirm={modal.onConfirm} confirmText={modal.confirmText} cancelText={modal.cancelText} />
@@ -3188,7 +3208,7 @@ function SortableLinkItem({ link, children }) {
   return children({ setNodeRef, style, attributes, listeners });
 }
 
-function EditorView({ data, setData, onBack, onSave, slug, settings, csrfToken, showAlert, darkMode, toggleDarkMode, isSaving, isSuccess }) {
+function EditorView({ data, setData, onBack, onSave, slug, settings, csrfToken, showAlert, darkMode, toggleDarkMode, isSaving, isSuccess, onLogout }) {
   const [activeTab, setActiveTab] = useState('details');
   const [isUploading, setIsUploading] = useState(false);
   const sensors = useSensors(
@@ -3277,20 +3297,30 @@ function EditorView({ data, setData, onBack, onSave, slug, settings, csrfToken, 
                <h1 className="text-xl font-bold text-text-primary dark:text-text-primary-dark">Editing: {slug}</h1>
              </div>
           </div>
-          <button
-            onClick={onSave}
-            disabled={isSaving}
-            className="px-5 py-2 bg-confirm dark:bg-confirm-dark text-confirm-text dark:text-confirm-text-dark rounded-full text-sm font-bold flex items-center gap-2 hover:bg-confirm-hover dark:hover:bg-confirm-hover-dark transition-colors disabled:opacity-50"
-          >
-            {isSaving ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
-            ) : isSuccess ? (
-              <Check className="w-4 h-4 text-green-500" />
-            ) : (
-              <Save className="w-4 h-4" />
+          <div className="flex items-center gap-2">
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="px-4 py-2 rounded-full text-sm font-medium text-text-muted dark:text-text-muted-dark bg-card dark:bg-card-dark border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-surface-dark transition-colors"
+              >
+                Logout
+              </button>
             )}
-            Save
-          </button>
+            <button
+              onClick={onSave}
+              disabled={isSaving}
+              className="px-5 py-2 bg-confirm dark:bg-confirm-dark text-confirm-text dark:text-confirm-text-dark rounded-full text-sm font-bold flex items-center gap-2 hover:bg-confirm-hover dark:hover:bg-confirm-hover-dark transition-colors disabled:opacity-50"
+            >
+              {isSaving ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : isSuccess ? (
+                <Check className="w-4 h-4 text-green-500" />
+              ) : (
+                <Save className="w-4 h-4" />
+              )}
+              Save
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 p-6 space-y-8">
