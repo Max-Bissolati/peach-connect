@@ -168,20 +168,71 @@ const PREVIEW_CACHE_DIR = path.join(__dirname, 'cache', 'previews');
 const PREVIEW_CACHE_MAX_AGE = 24 * 60 * 60 * 1000; // 24 hours
 const PREVIEW_CACHE_MAX_SIZE_MB = 100;
 
-// Delete and recreate cache directory on startup to ensure fresh previews after code updates
-try {
-  if (fs.existsSync(PREVIEW_CACHE_DIR)) {
-    // Remove the entire directory recursively
-    fs.rmSync(PREVIEW_CACHE_DIR, { recursive: true, force: true });
-    console.log('[Cache] Deleted preview cache directory on startup');
-  }
-  // Recreate the directory fresh
+// Ensure cache directory exists
+if (!fs.existsSync(PREVIEW_CACHE_DIR)) {
   fs.mkdirSync(PREVIEW_CACHE_DIR, { recursive: true });
-  console.log('[Cache] Preview cache directory recreated fresh:', PREVIEW_CACHE_DIR);
-} catch (err) {
-  console.error('[Cache] CRITICAL - Failed to setup cache directory on startup:', err.message);
-  process.exit(1); // Fail hard if we can't setup cache - better than silently proceeding
+  log('[Cache] Created preview cache directory');
 }
+
+// Clean up old cache files on startup (files older than 24 hours)
+async function cleanOldCacheFiles() {
+  try {
+    const files = await fs.promises.readdir(PREVIEW_CACHE_DIR);
+    let cleaned = 0;
+    for (const file of files) {
+      const filePath = path.join(PREVIEW_CACHE_DIR, file);
+      const stat = await fs.promises.stat(filePath);
+      if (Date.now() - stat.mtimeMs > PREVIEW_CACHE_MAX_AGE) {
+        await fs.promises.unlink(filePath);
+        cleaned++;
+      }
+    }
+    if (cleaned > 0) {
+      log(`[Cache] Cleaned ${cleaned} expired cache files`);
+    }
+  } catch (err) {
+    log('[Cache] Error cleaning old cache files:', err.message);
+  }
+}
+
+// Run cleanup on startup
+cleanOldCacheFiles();
+
+/**
+ * Enforce cache size limit by removing oldest files when exceeding limit
+ * Runs periodically to prevent unbounded cache growth
+ */
+async function enforceCacheSizeLimit() {
+  try {
+    const files = await fs.promises.readdir(PREVIEW_CACHE_DIR);
+    let totalSize = 0;
+    const fileStats = [];
+
+    for (const file of files) {
+      const filePath = path.join(PREVIEW_CACHE_DIR, file);
+      const stat = await fs.promises.stat(filePath);
+      totalSize += stat.size;
+      fileStats.push({ file, filePath, mtime: stat.mtimeMs, size: stat.size });
+    }
+
+    const maxSizeBytes = PREVIEW_CACHE_MAX_SIZE_MB * 1024 * 1024;
+
+    if (totalSize > maxSizeBytes) {
+      fileStats.sort((a, b) => a.mtime - b.mtime);
+      for (const f of fileStats) {
+        await fs.promises.unlink(f.filePath);
+        totalSize -= f.size;
+        if (totalSize <= maxSizeBytes * 0.9) break; // Stop at 90% of limit
+      }
+      log(`[Cache] Enforced size limit, removed files. Current size: ${(totalSize / (1024 * 1024)).toFixed(2)} MB`);
+    }
+  } catch (err) {
+    log('[Cache] Error enforcing size limit:', err.message);
+  }
+}
+
+// Run size enforcement every hour
+setInterval(enforceCacheSizeLimit, 60 * 60 * 1000);
 
 /**
  * Atomic write to cache to prevent race conditions (write-then-rename pattern)
