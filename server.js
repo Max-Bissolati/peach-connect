@@ -1925,7 +1925,7 @@ app.get('/api/cards/:slug', cardReadLimiter, [
 });
 
 // GET Admin Card by Owner (Admin endpoint - fetch a specific user's card by userId and slug)
-app.get('/api/admin/cards/:userId/:slug', requireAuth, requireRole('owner'), apiLimiter, [
+app.get('/api/admin/cards/:userId/:slug', apiLimiter, requireAuth, requireRole('owner'), [
   param('userId').isUUID().withMessage('Invalid userId'),
   slugValidation
 ], handleValidationErrors, (req, res, next) => {
@@ -3979,10 +3979,10 @@ async function injectMetaTags(html, cardIdentifier, displayIdentifier) {
     const metaTags = `
         <title>${fullName} - Digital Business Card</title>
         <meta name="description" content="${description}">
-        <meta property="og:url" content="${cardUrl}">
+        <meta property="og:url" content="${escapeXml(cardUrl)}">
         <meta property="og:title" content="${fullName}">
         <meta property="og:description" content="${description}">
-        <meta property="og:image" content="${previewUrl}">
+        <meta property="og:image" content="${escapeXml(previewUrl)}">
         <meta property="og:image:width" content="1200">
         <meta property="og:image:height" content="630">
         <meta property="og:image:type" content="image/png">
@@ -3990,7 +3990,7 @@ async function injectMetaTags(html, cardIdentifier, displayIdentifier) {
         <meta name="twitter:card" content="summary_large_image">
         <meta name="twitter:title" content="${fullName}">
         <meta name="twitter:description" content="${description}">
-        <meta name="twitter:image" content="${previewUrl}">
+        <meta name="twitter:image" content="${escapeXml(previewUrl)}">
         <meta name="robots" content="index, follow">
       `;
 
