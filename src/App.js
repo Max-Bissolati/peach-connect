@@ -597,6 +597,7 @@ export default function App() {
   const [modal, setModal] = useState({ isOpen: false, type: 'info', title: '', message: '', onConfirm: null, onClose: null, confirmText: 'OK', cancelText: 'Cancel' });
   const [createCardModal, setCreateCardModal] = useState({ isOpen: false, slug: '', userId: null });
   const [targetUserIdForNewCard, setTargetUserIdForNewCard] = useState(null);
+  const editInProgressRef = useRef(false);
   const [actionSelectionModal, setActionSelectionModal] = useState({ isOpen: false });
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
@@ -824,8 +825,12 @@ const [settings, setSettings] = useState({
         fetchCsrfToken();
         checkAuth().then((authResult) => {
           if (authResult.isAuthenticated) {
-            // After auth check, load the card data
-            handleEdit(slug);
+            // After auth check, load the card data — but skip if handleEdit is already
+            // in progress (e.g. triggered by the admin clicking the Edit button, which
+            // navigates here and would otherwise cause a second fetch without userId)
+            if (!editInProgressRef.current) {
+              handleEdit(slug);
+            }
           } else {
             // If auth fails, redirect to login (explicit redirect for unauthorized access)
             navigate('/login');
@@ -865,7 +870,7 @@ const [settings, setSettings] = useState({
       checkSetupStatus().then((status) => {
         if (status && status.setupComplete && status.userCount > 0) {
           // Setup already complete, redirect to login
-          navigate('/login');
+          navigate('/login', { replace: true });
         } else {
           // Setup not complete, show wizard
           setView('setup-wizard');
@@ -884,7 +889,7 @@ const [settings, setSettings] = useState({
       checkAuth().then((authResult) => {
         if (authResult.isAuthenticated) {
           // If authenticated, redirect to dashboard (explicit redirect)
-          navigate('/people');
+          navigate('/people', { replace: true });
         } else {
           // Not authenticated, show login page
           setView('admin-login');
@@ -900,7 +905,7 @@ const [settings, setSettings] = useState({
       fetchCsrfToken();
       checkAuth().then((authResult) => {
         if (!authResult.isAuthenticated) {
-          navigate('/login');
+          navigate('/login', { replace: true });
         }
       });
     } else if (path === '/users') {
@@ -908,7 +913,7 @@ const [settings, setSettings] = useState({
       fetchCsrfToken();
       checkAuth().then((authResult) => {
         if (!authResult.isAuthenticated) {
-          navigate('/login');
+          navigate('/login', { replace: true });
         }
       });
     } else if (path === '/admin' || path === '/' || path === '/people') {
@@ -922,7 +927,7 @@ const [settings, setSettings] = useState({
           // Demo mode: skip setup, go directly to auth check
           if (path === '/' || path === '/admin') {
             // Redirect root/admin to /people (explicit redirect)
-            navigate('/people');
+            navigate('/people', { replace: true });
             return; // Let next effect run handle /people
           }
           // Set view to loading while checking auth
@@ -934,11 +939,11 @@ const [settings, setSettings] = useState({
               document.title = "Admin Dashboard";
             } else {
               // This shouldn't happen in demo mode, but fallback to login just in case
-              navigate('/login');
+              navigate('/login', { replace: true });
             }
           }).catch((e) => {
             console.error('Auth check failed:', e);
-            navigate('/login');
+            navigate('/login', { replace: true });
           });
           return;
         }
@@ -947,17 +952,17 @@ const [settings, setSettings] = useState({
         // (status already checked above, setupComplete must be true to get here)
         if (status === null) {
           // If check failed (server not running, network error, etc.), default to setup wizard
-          navigate('/setup');
+          navigate('/setup', { replace: true });
           document.title = "Initial Setup";
         } else if (!status.setupComplete || status.userCount === 0) {
           // Setup not complete or no users exist, show setup wizard
-          navigate('/setup');
+          navigate('/setup', { replace: true });
           document.title = "Initial Setup";
         } else {
           // Setup complete, check authentication
           if (path === '/' || path === '/admin') {
             // Redirect root/admin to /people (explicit redirect)
-            navigate('/people');
+            navigate('/people', { replace: true });
             return; // Let next effect run handle /people
           }
           // Set view to loading while checking auth
@@ -971,7 +976,7 @@ const [settings, setSettings] = useState({
                 } else {
                   // Navigate to first card editor (explicit navigation)
                   const firstCard = authResult.cardList[0];
-                  navigate(`/people/edit/${firstCard.slug}`);
+                  navigate(`/people/edit/${firstCard.slug}`, { replace: true });
                 }
               } else {
                 // Owner - show dashboard
@@ -980,17 +985,17 @@ const [settings, setSettings] = useState({
           document.title = "Admin Dashboard";
             } else {
               // Not authenticated, redirect to login (explicit redirect)
-              navigate('/login');
+              navigate('/login', { replace: true });
             }
           }).catch((e) => {
             console.error('Auth check failed:', e);
-            navigate('/login');
+            navigate('/login', { replace: true });
           });
         }
       }).catch((e) => {
         // If promise rejects, default to setup wizard
         console.error('Setup status check failed:', e);
-        navigate('/setup');
+        navigate('/setup', { replace: true });
         document.title = "Initial Setup";
       });
     }
@@ -1019,7 +1024,11 @@ const [settings, setSettings] = useState({
           const list = await res.json();
           setCardList(list);
           setIsAuthenticated(true);
-          fetchSettings();
+          if (userData.role === 'member') {
+            fetchPublicSettings(userData.orgSlug || 'default');
+          } else {
+            fetchSettings();
+          }
           
           return { isAuthenticated: true, userData, cardList: list };
         } else {
@@ -1585,39 +1594,66 @@ const [settings, setSettings] = useState({
     }
   };
 
-  const handleEdit = async (slug) => {
-    const res = await fetch(`${API_ENDPOINT}/cards/${slug}`, {
-      credentials: 'include'
-    });
-    if (res.ok) {
-      const json = await res.json();
-      const defaultTemplate = getDefaultTemplate(settings);
-      setData({ 
-        ...defaultTemplate, 
-        ...json,
-        // Enforce default_organisation from organization settings
-        personal: {
-          ...defaultTemplate.personal,
-          ...json.personal,
-          company: settings?.default_organisation || json.personal?.company || defaultTemplate.personal.company
-        },
-        links: json.links || [],
-        privacy: json.privacy || defaultTemplate.privacy
-      });
-      setCurrentSlug(slug);
-      setView('admin-editor');
-      // Navigate to editor route only if not already there
-      if (location.pathname !== `/people/edit/${slug}`) {
-        navigate(`/people/edit/${slug}`);
+  const handleEdit = async (slug, userId) => {
+    editInProgressRef.current = true;
+    try {
+      // User IDs are UUID strings (crypto.randomUUID()). Guard against null/undefined/non-string values.
+      const validUserId = userId && typeof userId === 'string' && userId.trim() ? userId : null;
+      const isOtherUser = validUserId !== null && validUserId !== currentUserId;
+      const fetchUrl = isOtherUser
+        ? `${API_ENDPOINT}/admin/cards/${validUserId}/${slug}`
+        : `${API_ENDPOINT}/cards/${slug}`;
+      const res = await apiCall(fetchUrl);
+      if (res.ok) {
+        const json = await res.json();
+        const defaultTemplate = getDefaultTemplate(settings);
+        setData({ 
+          ...defaultTemplate, 
+          ...json,
+          // Enforce default_organisation from organization settings
+          personal: {
+            ...defaultTemplate.personal,
+            ...json.personal,
+            company: settings?.default_organisation || json.personal?.company || defaultTemplate.personal.company
+          },
+          links: json.links || [],
+          privacy: json.privacy || defaultTemplate.privacy
+        });
+        // Track the owner so handleSave sends it to the correct user's card
+        if (isOtherUser) {
+          setTargetUserIdForNewCard(validUserId);
+        } else {
+          setTargetUserIdForNewCard(null);
+        }
+        setCurrentSlug(slug);
+        setView('admin-editor');
+        // Navigate to editor route only if not already there
+        if (location.pathname !== `/people/edit/${slug}`) {
+          navigate(`/people/edit/${slug}`);
+        }
+      } else {
+        let errorMsg = 'Failed to load card';
+        try {
+          const errData = await res.json();
+          errorMsg = errData.error || errorMsg;
+        } catch {}
+        showAlert(`${errorMsg} (${res.status})`, 'error');
       }
+    } finally {
+      editInProgressRef.current = false;
     }
   };
 
-  const handleDelete = async (slug) => {
+  const handleDelete = async (slug, userId) => {
     showConfirm(
       `Are you sure you want to delete ${slug}?`,
       async () => {
-        const res = await apiCall(`${API_ENDPOINT}/cards/${slug}`, {
+        const validUserId = userId && typeof userId === 'string' && userId.trim() ? userId : null;
+        const isOtherUser = validUserId !== null && validUserId !== currentUserId;
+        const deleteUrl = isOtherUser
+          ? `${API_ENDPOINT}/cards/${slug}?userId=${encodeURIComponent(validUserId)}`
+          : `${API_ENDPOINT}/cards/${slug}`;
+        const res = await apiCall(deleteUrl, {
           method: 'DELETE'
         });
         if (res.ok) {
@@ -1929,7 +1965,7 @@ const [settings, setSettings] = useState({
                                   <div className="w-20 h-20 rounded-full bg-surface dark:bg-surface-dark overflow-hidden border-thick border-border-subtle dark:border-border-dark flex-shrink-0">
                                     {card.avatar ? <img src={card.avatar} className="w-full h-full object-cover" alt="avatar" /> : <User className="w-full h-full p-5 text-text-muted-subtle dark:text-text-muted-dark" />}
                                   </div>
-                                  <button onClick={(e) => { e.stopPropagation(); handleDelete(card.slug); }} className="absolute top-0 right-0 p-2 text-text-muted-subtle dark:text-text-muted-dark hover:text-error-text dark:hover:text-error-text-dark hover:bg-error-bg dark:hover:bg-error-bg-dark rounded-full transition-colors">
+                                   <button onClick={(e) => { e.stopPropagation(); handleDelete(card.slug, card.userId); }} className="absolute top-0 right-0 p-2 text-text-muted-subtle dark:text-text-muted-dark hover:text-error-text dark:hover:text-error-text-dark hover:bg-error-bg dark:hover:bg-error-bg-dark rounded-full transition-colors">
                                     <Trash2 className="w-4 h-4" />
                                   </button>
                                   <div className="flex-1 flex flex-col text-left min-w-0">
@@ -1962,7 +1998,7 @@ const [settings, setSettings] = useState({
                                   >
                                     <ExternalLink className="w-3 h-3"/> View
                                   </a>
-                                  <button onClick={() => handleEdit(card.slug)} className="flex-1 py-2 text-xs font-medium text-confirm-text dark:text-confirm-text-dark bg-confirm dark:bg-confirm-dark rounded-button hover:bg-confirm-hover dark:hover:bg-confirm-hover-dark flex items-center justify-center gap-1"><Edit3 className="w-3 h-3"/> Edit</button>
+                                   <button onClick={() => handleEdit(card.slug, card.userId)} className="flex-1 py-2 text-xs font-medium text-confirm-text dark:text-confirm-text-dark bg-confirm dark:bg-confirm-dark rounded-button hover:bg-confirm-hover dark:hover:bg-confirm-hover-dark flex items-center justify-center gap-1"><Edit3 className="w-3 h-3"/> Edit</button>
                                 </div>
                               </div>
                             </div>
@@ -2214,6 +2250,7 @@ const [settings, setSettings] = useState({
             toggleDarkMode={toggleDarkMode}
             isSaving={isSaving}
             isSuccess={isSuccess}
+            onLogout={userRole === 'member' ? handleLogout : undefined}
           />
           <VersionBadge />
           <Modal isOpen={modal.isOpen} onClose={closeModal} type={modal.type} title={modal.title} message={modal.message} onConfirm={modal.onConfirm} confirmText={modal.confirmText} cancelText={modal.cancelText} />
@@ -3188,7 +3225,7 @@ function SortableLinkItem({ link, children }) {
   return children({ setNodeRef, style, attributes, listeners });
 }
 
-function EditorView({ data, setData, onBack, onSave, slug, settings, csrfToken, showAlert, darkMode, toggleDarkMode, isSaving, isSuccess }) {
+function EditorView({ data, setData, onBack, onSave, slug, settings, csrfToken, showAlert, darkMode, toggleDarkMode, isSaving, isSuccess, onLogout }) {
   const [activeTab, setActiveTab] = useState('details');
   const [isUploading, setIsUploading] = useState(false);
   const sensors = useSensors(
@@ -3272,25 +3309,35 @@ function EditorView({ data, setData, onBack, onSave, slug, settings, csrfToken, 
       <div className="w-full lg:w-1/2 bg-card dark:bg-card-dark border-r border-border dark:border-border-dark h-auto lg:h-screen overflow-y-auto flex flex-col">
         <div className="p-6 border-b border-border-subtle dark:border-border-dark flex items-center justify-between bg-card dark:bg-card-dark sticky top-0 z-10">
           <div className="flex items-center gap-4">
-             <button onClick={onBack} className="p-2 hover:bg-surface dark:hover:bg-surface-dark rounded-full text-text-muted dark:text-text-muted-dark"><ArrowLeft className="w-5 h-5"/></button>
+             {!onLogout && <button onClick={onBack} className="p-2 hover:bg-surface dark:hover:bg-surface-dark rounded-full text-text-muted dark:text-text-muted-dark"><ArrowLeft className="w-5 h-5"/></button>}
              <div>
                <h1 className="text-xl font-bold text-text-primary dark:text-text-primary-dark">Editing: {slug}</h1>
              </div>
           </div>
-          <button
-            onClick={onSave}
-            disabled={isSaving}
-            className="px-5 py-2 bg-confirm dark:bg-confirm-dark text-confirm-text dark:text-confirm-text-dark rounded-full text-sm font-bold flex items-center gap-2 hover:bg-confirm-hover dark:hover:bg-confirm-hover-dark transition-colors disabled:opacity-50"
-          >
-            {isSaving ? (
-              <RefreshCw className="w-4 h-4 animate-spin" />
-            ) : isSuccess ? (
-              <Check className="w-4 h-4 text-green-500" />
-            ) : (
-              <Save className="w-4 h-4" />
+          <div className="flex items-center gap-2">
+            {onLogout && (
+              <button
+                onClick={onLogout}
+                className="px-4 py-2 rounded-full text-sm font-medium text-text-muted dark:text-text-muted-dark bg-card dark:bg-card-dark border border-border dark:border-border-dark hover:bg-surface dark:hover:bg-surface-dark transition-colors"
+              >
+                Logout
+              </button>
             )}
-            Save
-          </button>
+            <button
+              onClick={onSave}
+              disabled={isSaving}
+              className="px-5 py-2 bg-confirm dark:bg-confirm-dark text-confirm-text dark:text-confirm-text-dark rounded-full text-sm font-bold flex items-center gap-2 hover:bg-confirm-hover dark:hover:bg-confirm-hover-dark transition-colors disabled:opacity-50"
+            >
+              {isSaving ? (
+                <RefreshCw className="w-4 h-4 animate-spin" />
+              ) : isSuccess ? (
+                <Check className="w-4 h-4 text-green-500" />
+              ) : (
+                <Save className="w-4 h-4" />
+              )}
+              Save
+            </button>
+          </div>
         </div>
 
         <div className="flex-1 p-6 space-y-8">

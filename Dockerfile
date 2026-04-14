@@ -24,6 +24,18 @@ RUN npm run build && rm -rf .git
 # Production Stage
 FROM node:22-alpine
 WORKDIR /app
+
+# Copy fonts first, then install them
+COPY fonts/ ./fonts
+
+# Install fonts for SVG text rendering in preview images
+# Atkinson Hyperlegible font for improved accessibility (used in preview generation)
+# Fonts are embedded in the project for reliability
+RUN apk add --no-cache fontconfig \
+    && mkdir -p /usr/share/fonts/opentype \
+    && cp ./fonts/*.otf /usr/share/fonts/opentype/ \
+    && fc-cache -f /usr/share/fonts/
+
 COPY --from=build /app/build ./build
 COPY --from=build /app/src/active-branch.json ./active-branch.json
 COPY package*.json ./
