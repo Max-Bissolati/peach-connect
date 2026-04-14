@@ -597,6 +597,7 @@ export default function App() {
   const [modal, setModal] = useState({ isOpen: false, type: 'info', title: '', message: '', onConfirm: null, onClose: null, confirmText: 'OK', cancelText: 'Cancel' });
   const [createCardModal, setCreateCardModal] = useState({ isOpen: false, slug: '', userId: null });
   const [targetUserIdForNewCard, setTargetUserIdForNewCard] = useState(null);
+  const editInProgressRef = useRef(false);
   const [actionSelectionModal, setActionSelectionModal] = useState({ isOpen: false });
   const [showInviteModal, setShowInviteModal] = useState(false);
   const [showCreateUserModal, setShowCreateUserModal] = useState(false);
@@ -824,8 +825,12 @@ const [settings, setSettings] = useState({
         fetchCsrfToken();
         checkAuth().then((authResult) => {
           if (authResult.isAuthenticated) {
-            // After auth check, load the card data
-            handleEdit(slug);
+            // After auth check, load the card data — but skip if handleEdit is already
+            // in progress (e.g. triggered by the admin clicking the Edit button, which
+            // navigates here and would otherwise cause a second fetch without userId)
+            if (!editInProgressRef.current) {
+              handleEdit(slug);
+            }
           } else {
             // If auth fails, redirect to login (explicit redirect for unauthorized access)
             navigate('/login');
@@ -900,7 +905,7 @@ const [settings, setSettings] = useState({
       fetchCsrfToken();
       checkAuth().then((authResult) => {
         if (!authResult.isAuthenticated) {
-          navigate('/login');
+          navigate('/login', { replace: true });
         }
       });
     } else if (path === '/users') {
@@ -908,7 +913,7 @@ const [settings, setSettings] = useState({
       fetchCsrfToken();
       checkAuth().then((authResult) => {
         if (!authResult.isAuthenticated) {
-          navigate('/login');
+          navigate('/login', { replace: true });
         }
       });
     } else if (path === '/admin' || path === '/' || path === '/people') {
@@ -922,7 +927,7 @@ const [settings, setSettings] = useState({
           // Demo mode: skip setup, go directly to auth check
           if (path === '/' || path === '/admin') {
             // Redirect root/admin to /people (explicit redirect)
-            navigate('/people');
+            navigate('/people', { replace: true });
             return; // Let next effect run handle /people
           }
           // Set view to loading while checking auth
@@ -934,11 +939,11 @@ const [settings, setSettings] = useState({
               document.title = "Admin Dashboard";
             } else {
               // This shouldn't happen in demo mode, but fallback to login just in case
-              navigate('/login');
+              navigate('/login', { replace: true });
             }
           }).catch((e) => {
             console.error('Auth check failed:', e);
-            navigate('/login');
+            navigate('/login', { replace: true });
           });
           return;
         }
@@ -947,11 +952,11 @@ const [settings, setSettings] = useState({
         // (status already checked above, setupComplete must be true to get here)
         if (status === null) {
           // If check failed (server not running, network error, etc.), default to setup wizard
-          navigate('/setup');
+          navigate('/setup', { replace: true });
           document.title = "Initial Setup";
         } else if (!status.setupComplete || status.userCount === 0) {
           // Setup not complete or no users exist, show setup wizard
-          navigate('/setup');
+          navigate('/setup', { replace: true });
           document.title = "Initial Setup";
         } else {
           // Setup complete, check authentication
@@ -990,7 +995,7 @@ const [settings, setSettings] = useState({
       }).catch((e) => {
         // If promise rejects, default to setup wizard
         console.error('Setup status check failed:', e);
-        navigate('/setup');
+        navigate('/setup', { replace: true });
         document.title = "Initial Setup";
       });
     }
@@ -1590,41 +1595,52 @@ const [settings, setSettings] = useState({
   };
 
   const handleEdit = async (slug, userId) => {
-    // If editing another user's card, use the admin endpoint to fetch the correct card
-    const isOtherUser = userId && userId !== currentUserId;
-    const fetchUrl = isOtherUser
-      ? `${API_ENDPOINT}/admin/cards/${userId}/${slug}`
-      : `${API_ENDPOINT}/cards/${slug}`;
-    const res = await fetch(fetchUrl, {
-      credentials: 'include'
-    });
-    if (res.ok) {
-      const json = await res.json();
-      const defaultTemplate = getDefaultTemplate(settings);
-      setData({ 
-        ...defaultTemplate, 
-        ...json,
-        // Enforce default_organisation from organization settings
-        personal: {
-          ...defaultTemplate.personal,
-          ...json.personal,
-          company: settings?.default_organisation || json.personal?.company || defaultTemplate.personal.company
-        },
-        links: json.links || [],
-        privacy: json.privacy || defaultTemplate.privacy
-      });
-      // Track the owner so handleSave sends it to the correct user's card
-      if (isOtherUser) {
-        setTargetUserIdForNewCard(userId);
+    editInProgressRef.current = true;
+    try {
+      // User IDs are UUID strings (crypto.randomUUID()). Guard against null/undefined/non-string values.
+      const validUserId = userId && typeof userId === 'string' && userId.trim() ? userId : null;
+      const isOtherUser = validUserId !== null && validUserId !== currentUserId;
+      const fetchUrl = isOtherUser
+        ? `${API_ENDPOINT}/admin/cards/${validUserId}/${slug}`
+        : `${API_ENDPOINT}/cards/${slug}`;
+      const res = await apiCall(fetchUrl);
+      if (res.ok) {
+        const json = await res.json();
+        const defaultTemplate = getDefaultTemplate(settings);
+        setData({ 
+          ...defaultTemplate, 
+          ...json,
+          // Enforce default_organisation from organization settings
+          personal: {
+            ...defaultTemplate.personal,
+            ...json.personal,
+            company: settings?.default_organisation || json.personal?.company || defaultTemplate.personal.company
+          },
+          links: json.links || [],
+          privacy: json.privacy || defaultTemplate.privacy
+        });
+        // Track the owner so handleSave sends it to the correct user's card
+        if (isOtherUser) {
+          setTargetUserIdForNewCard(validUserId);
+        } else {
+          setTargetUserIdForNewCard(null);
+        }
+        setCurrentSlug(slug);
+        setView('admin-editor');
+        // Navigate to editor route only if not already there
+        if (location.pathname !== `/people/edit/${slug}`) {
+          navigate(`/people/edit/${slug}`);
+        }
       } else {
-        setTargetUserIdForNewCard(null);
+        let errorMsg = 'Failed to load card';
+        try {
+          const errData = await res.json();
+          errorMsg = errData.error || errorMsg;
+        } catch {}
+        showAlert(`${errorMsg} (${res.status})`, 'error');
       }
-      setCurrentSlug(slug);
-      setView('admin-editor');
-      // Navigate to editor route only if not already there
-      if (location.pathname !== `/people/edit/${slug}`) {
-        navigate(`/people/edit/${slug}`);
-      }
+    } finally {
+      editInProgressRef.current = false;
     }
   };
 
@@ -1632,9 +1648,10 @@ const [settings, setSettings] = useState({
     showConfirm(
       `Are you sure you want to delete ${slug}?`,
       async () => {
-        const isOtherUser = userId && userId !== currentUserId;
+        const validUserId = userId && typeof userId === 'string' && userId.trim() ? userId : null;
+        const isOtherUser = validUserId !== null && validUserId !== currentUserId;
         const deleteUrl = isOtherUser
-          ? `${API_ENDPOINT}/cards/${slug}?userId=${encodeURIComponent(userId)}`
+          ? `${API_ENDPOINT}/cards/${slug}?userId=${encodeURIComponent(validUserId)}`
           : `${API_ENDPOINT}/cards/${slug}`;
         const res = await apiCall(deleteUrl, {
           method: 'DELETE'
@@ -3292,7 +3309,7 @@ function EditorView({ data, setData, onBack, onSave, slug, settings, csrfToken, 
       <div className="w-full lg:w-1/2 bg-card dark:bg-card-dark border-r border-border dark:border-border-dark h-auto lg:h-screen overflow-y-auto flex flex-col">
         <div className="p-6 border-b border-border-subtle dark:border-border-dark flex items-center justify-between bg-card dark:bg-card-dark sticky top-0 z-10">
           <div className="flex items-center gap-4">
-             <button onClick={onBack} className="p-2 hover:bg-surface dark:hover:bg-surface-dark rounded-full text-text-muted dark:text-text-muted-dark"><ArrowLeft className="w-5 h-5"/></button>
+             {!onLogout && <button onClick={onBack} className="p-2 hover:bg-surface dark:hover:bg-surface-dark rounded-full text-text-muted dark:text-text-muted-dark"><ArrowLeft className="w-5 h-5"/></button>}
              <div>
                <h1 className="text-xl font-bold text-text-primary dark:text-text-primary-dark">Editing: {slug}</h1>
              </div>

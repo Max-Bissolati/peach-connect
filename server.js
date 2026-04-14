@@ -1926,16 +1926,19 @@ app.get('/api/cards/:slug', cardReadLimiter, [
 
 // GET Admin Card by Owner (Admin endpoint - fetch a specific user's card by userId and slug)
 app.get('/api/admin/cards/:userId/:slug', requireAuth, requireRole('owner'), apiLimiter, [
-  param('userId').isInt({ min: 1 }).withMessage('Invalid userId'),
+  param('userId').isUUID().withMessage('Invalid userId'),
   slugValidation
 ], handleValidationErrors, (req, res, next) => {
-  const targetUserId = parseInt(req.params.userId, 10);
+  const targetUserId = req.params.userId;
   const slug = req.params.slug.toLowerCase();
 
   // Verify the target user belongs to the same organisation as the admin
   db.get(
-    "SELECT id FROM users WHERE id = ? AND organisation_id = ?",
-    [targetUserId, req.user.organisationId],
+    `SELECT u.id FROM users u
+     WHERE u.id = ? AND u.organisation_id = (
+       SELECT organisation_id FROM users WHERE id = ?
+     )`,
+    [targetUserId, req.user.id],
     (err, user) => {
       if (err) return next(err);
       if (!user) return res.status(404).json({ error: 'User not found in your organisation' });
@@ -2230,7 +2233,7 @@ app.delete('/api/cards/:slug', requireAuth, apiLimiter, csrfProtection, [
   }
 
   // Owners may pass ?userId= to delete another user's card within their organisation
-  const requestedUserId = req.query.userId ? parseInt(req.query.userId, 10) : null;
+  const requestedUserId = req.query.userId || null;
   const isOwnerDeletingForUser =
     req.user.role === 'owner' && requestedUserId && requestedUserId !== req.user.id;
 
@@ -2260,10 +2263,10 @@ app.delete('/api/cards/:slug', requireAuth, apiLimiter, csrfProtection, [
   };
 
   if (isOwnerDeletingForUser) {
-    // Verify the target user belongs to the same organisation
+    // Verify the target user belongs to the same organisation (use subquery to avoid stale JWT org value)
     db.get(
-      "SELECT id FROM users WHERE id = ? AND organisation_id = ?",
-      [requestedUserId, req.user.organisationId],
+      "SELECT id FROM users WHERE id = ? AND organisation_id = (SELECT organisation_id FROM users WHERE id = ?)",
+      [requestedUserId, req.user.id],
       (err, user) => {
         if (err) return next(err);
         if (!user) return res.status(404).json({ error: 'User not found in your organisation' });
