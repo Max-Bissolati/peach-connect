@@ -90,43 +90,52 @@ const buildQrPayload = (shortCode, data) => {
   const { personal = {}, contact = {} } = data || {};
 
   const safe = (v, maxLen = 120) => sanitizeText(v || '').substring(0, maxLen);
-  
+  // Phone numbers are not HTML — use a dedicated sanitiser that preserves valid
+  // phone characters (E.164, national formats) without risk of DOMPurify
+  // treating angle brackets or other characters as HTML and stripping them.
+  const sanitizePhone = (v) =>
+    (v || '').replace(/[^0-9+\s\-().#*]/g, '').trim().substring(0, 50);
+
   const firstName = safe(personal.firstName || '', 40);
   const lastName = safe(personal.lastName || '', 40);
   const fullName = `${firstName} ${lastName}`.trim();
   const company = safe(personal.company || '', 80);
   const email = safe(contact.email || '', 120);
-  const phone = safe(contact.phone || '', 50);
+  const phone = sanitizePhone(contact.phone);
 
   // Use short code for QR URL (always use short code for simpler QR)
   const cardUrl = typeof window !== 'undefined' && shortCode
     ? `${window.location.origin}/${shortCode}`
     : '';
 
-  // Build vCard 3.0 format (minimal for QR scanning reliability)
-  let vcard = 'BEGIN:VCARD\nVERSION:3.0\n';
-  
+  // Build vCard 3.0 format with CRLF line endings per RFC 2426 §2.4.2.
+  // Some Android QR-scanner apps use a strict parser that requires \r\n;
+  // the system contacts importer (used for VCF downloads) is lenient about this.
+  let vcard = 'BEGIN:VCARD\r\nVERSION:3.0\r\n';
+
   if (fullName) {
-    vcard += `FN:${fullName}\n`;
-    vcard += `N:${lastName};${firstName};;;\n`;
+    vcard += `FN:${fullName}\r\n`;
+    vcard += `N:${lastName};${firstName};;;\r\n`;
   }
-  
+
   if (company) {
-    vcard += `ORG:${company}\n`;
+    vcard += `ORG:${company}\r\n`;
   }
-  
+
   if (email) {
-    vcard += `EMAIL;TYPE=WORK:${email}\n`;
+    vcard += `EMAIL;TYPE=WORK:${email}\r\n`;
   }
-  
+
   if (phone) {
-    vcard += `TEL;TYPE=CELL:${phone}\n`;
+    // TYPE=CELL,VOICE improves compatibility with Android contact apps that
+    // look for VOICE type when mapping a phone number field.
+    vcard += `TEL;TYPE=CELL,VOICE:${phone}\r\n`;
   }
-  
+
   if (cardUrl) {
-    vcard += `URL:${cardUrl}\n`;
+    vcard += `URL:${cardUrl}\r\n`;
   }
-  
+
   vcard += 'END:VCARD';
 
   return vcard;
