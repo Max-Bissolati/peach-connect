@@ -4,7 +4,7 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="theme-color" content="#EC5228" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com; img-src 'self' data: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; font-src 'self' data:;" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self' https://api.github.com https://analytics.thingymajigs.app; img-src 'self' data: https:; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://analytics.thingymajigs.app; style-src 'self' 'unsafe-inline'; font-src 'self' data:;" />
     <link rel="manifest" id="pwa-manifest" href="%PUBLIC_URL%/manifest.json" />
     <link rel="icon" type="image/svg+xml" href="%PUBLIC_URL%/favicon.svg" />
     <link rel="icon" type="image/png" sizes="96x96" href="%PUBLIC_URL%/favicon-96x96.png" />
@@ -111,6 +111,7 @@
       .dark .swiish-logo { filter: none !important; opacity: 1 !important; }
       .group:hover .swiish-logo { filter: none !important; opacity: 1 !important; }
     </style>
+    <script defer src="https://analytics.thingymajigs.app/api/script" data-site-id="1"></script>
   </head>
   <body>
     <noscript>You need to enable JavaScript to run this app.</noscript>
