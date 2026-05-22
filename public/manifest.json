@@ -1,29 +1,23 @@
 {
-  "short_name": "Swiish",
-  "name": "Swiish",
+  "short_name": "Peach",
+  "name": "Peach Payments",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#020617",
-  "theme_color": "#020617",
-  "description": "Swiish digital business card – share your details instantly, even offline.",
+  "background_color": "#EC5228",
+  "theme_color": "#EC5228",
+  "description": "Peach Payments digital business card – connect with our team.",
   "icons": [
     {
-      "src": "/graphics/Swiish_Logo_Device.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
-      "purpose": "any"
-    },
-    {
-      "src": "/graphics/Swiish_Logo_Device.svg",
+      "src": "/web-app-manifest-192x192.png",
       "sizes": "192x192",
-      "type": "image/svg+xml"
+      "type": "image/png",
+      "purpose": "maskable"
     },
     {
-      "src": "/graphics/Swiish_Logo_Device.svg",
+      "src": "/web-app-manifest-512x512.png",
       "sizes": "512x512",
-      "type": "image/svg+xml"
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ]
 }
-
-

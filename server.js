@@ -24,7 +24,7 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 
 // Short code configuration
-const SHORT_CODE_LENGTH = 7;
+const SHORT_CODE_LENGTH = 100;
 const SHORT_CODE_CHARS = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
 
 // Logging configuration
@@ -1679,15 +1679,15 @@ app.get('/api/cards/short/:shortCode', cardReadLimiter, (req, res, next) => {
   const shortCode = (req.params.shortCode || '').trim();
   log(`[API] GET /api/cards/short/${shortCode} - Request received`);
   
-  // Validate: exactly 7 alphanumeric characters
-  if (!shortCode || shortCode.length !== 7) {
+  // Validate: 1-100 alphanumeric characters or hyphens (supports slug-style short codes)
+  if (!shortCode || shortCode.length === 0 || shortCode.length > SHORT_CODE_LENGTH) {
     log(`[API] Short code validation failed: length=${shortCode?.length || 0}`);
-    return res.status(400).json({ error: `Short code must be exactly ${SHORT_CODE_LENGTH} characters` });
+    return res.status(400).json({ error: `Short code must be 1-${SHORT_CODE_LENGTH} characters` });
   }
-  
-  if (!new RegExp(`^[a-zA-Z0-9]{${SHORT_CODE_LENGTH}}$`).test(shortCode)) {
+
+  if (!/^[a-zA-Z0-9-]{1,100}$/.test(shortCode)) {
     log(`[API] Short code validation failed: invalid format`);
-    return res.status(400).json({ error: 'Short code must contain only letters and numbers' });
+    return res.status(400).json({ error: 'Short code must contain only letters, numbers, and hyphens' });
   }
   
   log(`[API] Short code validated, querying database...`);
@@ -2317,7 +2317,7 @@ const getOrganizationSettings = (organisationId, callback) => {
 // Returns settings from specified organization or default organization
 // Accepts optional ?orgSlug= parameter to get settings for a specific organization
 app.get('/api/settings', apiLimiter, (req, res, next) => {
-  const orgSlug = req.query.orgSlug || 'default';
+  const orgSlug = req.query.orgSlug || 'peach-payments';
   
   // Get theme_colors, theme_variant, and default_organisation from specified organization
   db.all(`
