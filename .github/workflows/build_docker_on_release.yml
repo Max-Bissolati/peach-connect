@@ -46,5 +46,5 @@ jobs:
           platforms: linux/arm64
           tags: ${{ steps.lower.outputs.image }}:latest
           labels: |
-            org.opencontainers.image.title=Peach Swiish
-            org.opencontainers.image.description=Peach Payments branded digital business cards
+            org.opencontainers.image.title=PeachConnect
+            org.opencontainers.image.description=Peach Payments digital business cards for events
