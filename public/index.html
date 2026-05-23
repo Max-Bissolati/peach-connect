@@ -93,7 +93,7 @@
 
       /* Hero banner — brand background image */
       .h-44.bg-surface, .h-44.bg-surface-dark {
-        background: url(/textures/pp-hero-bg.png) center/cover no-repeat !important;
+        background: url(/textures/pp-hero-bg.jpg) center/cover no-repeat !important;
       }
       .h-44.bg-surface .opacity-90, .h-44 .opacity-90 {
         background: transparent !important;
@@ -108,9 +108,10 @@
       button.bg-action:hover, button.bg-confirm:hover {
         background-color: #d44a22 !important;
       }
-      /* "Send your details" — confirm text white in both modes */
-      .text-confirm-text, .dark .text-confirm-text-dark { color: #ffffff !important; }
-      button.bg-confirm svg, .dark button.bg-confirm svg { color: #ffffff !important; }
+      /* "Send your details" — confirm text + icon white in both modes */
+      button.bg-confirm, button.bg-confirm span, button.bg-confirm div,
+      [class*="bg-confirm"] { color: #ffffff !important; }
+      button.bg-confirm svg, [class*="bg-confirm"] svg { color: #ffffff !important; fill: #ffffff !important; }
 
       /* Links — navy in light mode, white in dark mode */
       a, .text-link, [class*=text-link] { color: #070A43 !important; }
