@@ -80,14 +80,18 @@
 
       /* Card page: text color overrides */
       h1, h2, .text-2xl, .text-xl, [class*='text-2xl'], [class*='text-xl'],
-      .text-text-primary { color: var(--color-text-primary-light) !important; }
-      .dark .text-text-primary { color: var(--color-text-primary-dark) !important; }
+      .text-text-primary { color: #070A43 !important; }
+      .dark h1, .dark h2, .dark .text-2xl, .dark .text-xl,
+      .dark .text-text-primary { color: #ffffff !important; }
 
-      .bg-main h1, .bg-main h2, .bg-main h3, .bg-main-dark h1, .bg-main-dark h2, .bg-main-dark h3,
-      .bg-card h1, .bg-card h2, .bg-card-dark h1, .bg-card-dark h2 {
+      /* Hero gradient headings — white in both modes */
+      .bg-action h1, .bg-action h2 { color: #ffffff !important; }
+      .dark .bg-card h1, .dark .bg-card h2,
+      .dark .bg-main h1, .dark .bg-main h2, .dark .bg-main h3 {
         color: #ffffff !important;
       }
 
+      /* Buttons */
       button.bg-action, button.bg-confirm, .bg-action, .bg-confirm {
         background-color: #EC5228 !important;
         color: #ffffff !important;
@@ -96,15 +100,15 @@
         background-color: #d44a22 !important;
       }
 
-      .card-title, .job-title, [class*=job], [class*=title] {
-        color: #ffffff !important;
-        text-shadow: 0 1px 3px rgba(0,0,0,0.3);
-      }
+      /* Links — navy in light mode, white in dark mode */
+      a, .text-link, [class*=text-link] { color: #070A43 !important; }
+      a:hover { color: #343666 !important; }
+      .dark a, .dark .text-link, .dark [class*=text-link] { color: #ffffff !important; }
+      .dark a:hover { color: #e0e0e0 !important; }
 
-      a, .text-link, [class*=text-link] { color: #FFC539 !important; }
-      a:hover { color: #e6b125 !important; }
-
-      /* CTA link rows — white text in dark mode */
+      /* CTA link rows */
+      a.rounded-input { color: #070A43 !important; }
+      a.rounded-input svg { color: #070A43 !important; }
       .dark a.rounded-input { color: #ffffff !important; }
       .dark a.rounded-input:hover { color: #ffffff !important; opacity: 0.9; }
       .dark a.rounded-input svg { color: #ffffff !important; }
@@ -112,7 +116,7 @@
       .bg-main, body { background-color: #ffffff !important; }
       .dark .bg-main, .dark body { background-color: #070A43 !important; }
 
-      .swiish-logo { filter: none !important; opacity: 1 !important; height: 32px !important; }
+      .swiish-logo { filter: none !important; opacity: 1 !important; height: 48px !important; }
       .dark .swiish-logo { filter: none !important; opacity: 1 !important; }
       .group:hover .swiish-logo { filter: none !important; opacity: 1 !important; }
     </style>
